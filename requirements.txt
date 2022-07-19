@@ -1,0 +1,6 @@
+torch>=1.8.1
+numpy
+sklearn
+h5py
+pandas
+ax-platform
