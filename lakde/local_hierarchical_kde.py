@@ -11,10 +11,13 @@ from lakde.linalg_util import mvdigamma, mvlgamma, stabilized_cholesky, chol_log
 
 def expect_log_p_lambda(nu_0, expect_logdet_lambda, expect_log_tau, expect_logdet_sigma_shared,
                         expect_sigma_shared_lambda_trace, D):
-    expect_log_B_p = -nu_0 / 2 * (
-            -D * expect_log_tau - D * torch.log(nu_0) - expect_logdet_sigma_shared + D * math.log(2)) - mvlgamma(
-            nu_0 / 2, D)
-    return torch.sum(expect_log_B_p + (nu_0 - D - 1) * expect_logdet_lambda / 2) - nu_0 * expect_sigma_shared_lambda_trace / 2
+    expect_log_B_p = (-nu_0 / 2 * (D * math.log(2)
+                                   - D * expect_log_tau
+                                   - D * torch.log(nu_0)
+                                   - expect_logdet_sigma_shared)
+                      - mvlgamma(nu_0 / 2, D))
+    return (torch.sum(expect_log_B_p + (nu_0 - D - 1) * expect_logdet_lambda / 2)
+            - nu_0 * expect_sigma_shared_lambda_trace / 2)
 
 def expect_log_q_lambda(nu, expect_logdet_lambda, logdet_W, D):
     expect_log_B_q = -nu / 2 * (logdet_W + D * math.log(2)) - mvlgamma(nu / 2, D)
@@ -22,10 +25,12 @@ def expect_log_q_lambda(nu, expect_logdet_lambda, logdet_W, D):
 
 def expect_log_p_sigma_shared(nu_shared_0, logdet_sigma_0, expect_logdet_sigma_shared,
                               expect_sigma_shared_lambda_0_trace, D):
-    expect_log_B_p = -nu_shared_0 / 2 * (logdet_sigma_0 + D * math.log(2) - D * torch.log(nu_shared_0)) - mvlgamma(
-            nu_shared_0 / 2, D)
-    return expect_log_B_p + (
-            nu_shared_0 - D - 1) * expect_logdet_sigma_shared / 2 - nu_shared_0 * expect_sigma_shared_lambda_0_trace / 2
+    expect_log_B_p = (-nu_shared_0 / 2 * (logdet_sigma_0
+                                          + D * math.log(2)
+                                          - D * torch.log(nu_shared_0))
+                      - mvlgamma(nu_shared_0 / 2, D))
+    return (expect_log_B_p + (nu_shared_0 - D - 1) * expect_logdet_sigma_shared / 2
+            - nu_shared_0 * expect_sigma_shared_lambda_0_trace / 2)
 
 def expect_log_q_sigma_shared(nu_shared, logdet_W_shared, expect_logdet_sigma_shared, D):
     expect_log_B_q = -nu_shared / 2 * (logdet_W_shared + D * math.log(2)) - mvlgamma(nu_shared / 2, D)

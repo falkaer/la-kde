@@ -12,9 +12,13 @@ from lakde.linalg_util import chol_mm_trace, mvdigamma, mvlgamma, stabilized_cho
 
 def expect_log_p_lambda(nu_0, expect_tau, expect_log_tau, expect_logdet_lambda, sigma_0_lambda_mm_trace, logdet_sigma_0,
                         D):
-    expect_log_B_p = -nu_0 / 2 * (
-            -logdet_sigma_0 - D * expect_log_tau - D * torch.log(nu_0) + D * math.log(2)) - mvlgamma(nu_0 / 2, D)
-    return torch.sum(expect_log_B_p + (nu_0 - D - 1) * expect_logdet_lambda / 2 - expect_tau * nu_0 * sigma_0_lambda_mm_trace / 2)
+    expect_log_B_p = (-nu_0 / 2 * (D * math.log(2)
+                                   - logdet_sigma_0
+                                   - D * expect_log_tau
+                                   - D * torch.log(nu_0))
+                      - mvlgamma(nu_0 / 2, D))
+    return torch.sum(expect_log_B_p + (nu_0 - D - 1) * expect_logdet_lambda / 2
+                     - expect_tau * nu_0 * sigma_0_lambda_mm_trace / 2)
 
 def expect_log_q_lambda(nu, expect_logdet_lambda, logdet_W, D):
     expect_log_B_q = -nu / 2 * (logdet_W + D * math.log(2)) - mvlgamma(nu / 2, D)

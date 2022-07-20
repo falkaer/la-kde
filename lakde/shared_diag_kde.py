@@ -11,16 +11,17 @@ from lakde.utils import InterruptDelay, tensor_as, var
 def calc_log_rho_block(X_test, X_train, nu, w):
     D = X_test.size(1)
     expect_log_lambda = torch.sum(torch.digamma(nu) - torch.log(w))
-    expect_lambda = nu / w
-    Lambda_triu = torch.diag_embed(torch.sqrt(expect_lambda)).expand(X_train.size(0), D, D)
-    Q = chol_quad_form(Lambda_triu, X_train, X_test)
-    Q *= -1 / 2
-    Q += expect_log_lambda / 2
+    W_triu = torch.diag_embed(torch.sqrt(1 / w)).expand(X_train.size(0), D, D)
+    exponent = -0.5 * nu
+    const = 0.5 * expect_log_lambda
+    Q = chol_quad_form(W_triu, X_train, X_test)
+    Q *= exponent
+    Q += const
     return Q
 
 def expect_log_p_lambda(nu_0, expect_lambda, expect_log_lambda, sigma_sq):
-    return torch.sum(-lgamma(nu_0) + nu_0 * (- torch.log(sigma_sq)) + (
-            nu_0 - 1) * expect_log_lambda - expect_lambda / sigma_sq)
+    return torch.sum(-lgamma(nu_0) + nu_0 * (torch.log(nu_0) + torch.log(sigma_sq))
+                     + (nu_0 - 1) * expect_log_lambda - expect_lambda / sigma_sq)
 
 def expect_log_q_lambda(nu, w, expect_log_lambda):
     return torch.sum(-lgamma(nu) + nu * torch.log(w) + (nu - 1) * expect_log_lambda - nu)
@@ -167,16 +168,17 @@ class SharedDiagonalizedKDE(AbstractKDE):
         expect_log_lambda_q = expect_log_q_lambda(self.nu, self.w, expect_log_lambda)
         expect_log_z_p = -N * math.log(N - 1)
         
-        expect_log_likelihood = self.data_log_likelihood(X).sum()
+        expect_log_likelihood_no_rnm = self.data_log_likelihood_no_rnm(X).sum()
         expect_log_lambda_diff = expect_log_lambda_p - expect_log_lambda_q
         expect_log_z_diff = expect_log_z_p  # - expect_log_z_q
         
-        elbo = expect_log_likelihood + expect_log_lambda_diff + expect_log_z_diff
+        elbo = expect_log_likelihood_no_rnm + expect_log_lambda_diff + expect_log_z_diff
         
         if self.logger:
             with InterruptDelay():
                 self.logger.add_scalar('elbo/elbo', elbo, self.iter_steps)
-                self.logger.add_scalar('elbo/expect_log_likelihood', expect_log_likelihood, self.iter_steps)
+                self.logger.add_scalar('elbo/expect_log_likelihood_no_rnm', expect_log_likelihood_no_rnm,
+                                       self.iter_steps)
                 self.logger.add_scalar('elbo/expect_log_z_diff', expect_log_z_diff, self.iter_steps)
                 self.logger.add_scalar('elbo/expect_log_lambda_diff', expect_log_lambda_diff, self.iter_steps)
                 
@@ -210,7 +212,7 @@ class SharedDiagonalizedKDE(AbstractKDE):
     def sample(self, X, n):
         N, D = X.shape
         eps = torch.finfo(X.dtype).eps
-        scale = self.nu / self.w
+        scale = self.w / self.nu
         inds = torch.randint(N, (n,), device=X.device)
         
         # x_hat ~ St(x_n, nu / w, 2nu) is equivalent to
@@ -218,7 +220,7 @@ class SharedDiagonalizedKDE(AbstractKDE):
         # threshold u to avoid very unlikely divide by zero
         y = torch.distributions.Normal(loc=X.new_zeros(D), scale=scale).sample((n,))
         u = torch.clamp_min(torch.distributions.Chi2(df=2 * self.nu).sample((n, D)), eps)
-        return X[inds] + y / torch.sqrt(u / (2 * self.nu))[..., None]
+        return X[inds] + y / torch.sqrt(u / (2 * self.nu))
     
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)

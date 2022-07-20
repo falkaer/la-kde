@@ -11,14 +11,16 @@ from lakde.utils import InterruptDelay, cov, tensor_as
 def calc_log_rho_block(X_test, X_train, nu, W_triu, logdet_W):
     D = X_test.size(1)
     expect_logdet_lambda = mvdigamma(nu / 2, D) + D * math.log(2) + logdet_W
+    exponent = -0.5 * nu
+    const = 0.5 * expect_logdet_lambda
     Q = chol_quad_form(W_triu, X_train, X_test)
-    Q *= -nu / 2
-    Q += expect_logdet_lambda / 2
+    Q *= exponent
+    Q += const
     return Q
 
 def expect_log_p_lambda(nu_0, expect_logdet_lambda, sigma_0_lambda_mm_trace, logdet_sigma_0, D):
-    expect_log_B_p = -nu_0 / 2 * (
-            -logdet_sigma_0 - D * torch.log(nu_0) + D * math.log(2)) - mvlgamma(nu_0 / 2, D)
+    expect_log_B_p = (-nu_0 / 2 * (D * math.log(2) - logdet_sigma_0 - D * torch.log(nu_0))
+                      - mvlgamma(nu_0 / 2, D))
     return expect_log_B_p + (nu_0 - D - 1) * expect_logdet_lambda / 2 - nu_0 * sigma_0_lambda_mm_trace / 2
 
 def expect_log_q_lambda(nu, expect_logdet_lambda, logdet_W, D):
@@ -192,16 +194,17 @@ class SharedFullKDE(AbstractKDE):
         
         expect_log_z_p = -N * math.log(N - 1)
         
-        expect_log_likelihood = self.data_log_likelihood_no_rnm(X).sum()
+        expect_log_likelihood_no_rnm = self.data_log_likelihood_no_rnm(X).sum()
         expect_log_lambda_diff = expect_log_lambda_p - expect_log_lambda_q
         expect_log_z_diff = expect_log_z_p  # - expect_log_z_q
         
-        elbo = expect_log_likelihood + expect_log_lambda_diff + expect_log_z_diff
+        elbo = expect_log_likelihood_no_rnm + expect_log_lambda_diff + expect_log_z_diff
         
         if self.logger:
             with InterruptDelay():
                 self.logger.add_scalar('elbo/elbo', elbo, self.iter_steps)
-                self.logger.add_scalar('elbo/expect_log_likelihood', expect_log_likelihood, self.iter_steps)
+                self.logger.add_scalar('elbo/expect_log_likelihood_no_rnm', expect_log_likelihood_no_rnm,
+                                       self.iter_steps)
                 self.logger.add_scalar('elbo/expect_log_z_diff', expect_log_z_diff, self.iter_steps)
                 self.logger.add_scalar('elbo/expect_log_lambda_diff', expect_log_lambda_diff, self.iter_steps)
                 
@@ -235,7 +238,7 @@ class SharedFullKDE(AbstractKDE):
     def sample(self, X, n):
         N, D = X.shape
         eps = torch.finfo(X.dtype).eps
-        scale_tril = (self.nu + 1 - D)[:, None, None] * self.W_triu
+        scale_tril = tril_inverse(torch.sqrt(self.nu + 1 - D)[:, None, None] * self.W_triu).T
         inds = torch.randint(N, (n,), device=X.device)
         
         # x_hat ~ St(x_n, (nu + 1 - D) * W, nu + 1 - D) is equivalent to

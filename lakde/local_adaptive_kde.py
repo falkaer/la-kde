@@ -19,7 +19,7 @@ def calc_log_rho_block(X_test, X_train, nu, W_triu, logdet_W):
     D = X_test.size(-1)
     expect_logdet_lambda = mvdigamma(nu / 2, D) + D * math.log(2) + logdet_W
     exponent = -0.5 * nu
-    const = -0.5 * expect_logdet_lambda
+    const = 0.5 * expect_logdet_lambda
     Q = chol_quad_form(W_triu, X_train, X_test)
     Q *= exponent[:, None]
     Q += const[:, None]
@@ -69,7 +69,6 @@ class LocallyAdaptiveKDE(AbstractKDE, ABC):
         W_inv = sigma_0.to(W_inv_contrib.dtype) * (self.nu_0 * expect_tau)[:, None, None]
         W_inv += W_inv_contrib
         W_inv_tril, W_inv_jitter[:] = stabilized_cholesky(W_inv, W_inv_jitter, verbose=self.verbose)
-        # reuse W_inv_tril and W_inv storage
         W_triu = tril_inverse(W_inv_tril).mT
         return W_triu
     
@@ -135,8 +134,9 @@ class LocallyAdaptiveKDE(AbstractKDE, ABC):
             rnm_sums.scatter_add_(0, col, values)
         
         # correct normalization constant drift (enforce sum(rnm, dim=0) = 1)
-        rnm_log_consts.add_(torch.clamp_min(rnm_sums, finfo.eps).log())
-        coeff = torch.reciprocal_(rnm_sums)
+        rnm_sums = torch.clamp_min(rnm_sums, finfo.eps)
+        rnm_log_consts += rnm_sums.log()
+        coeff = torch.reciprocal(rnm_sums)
         torch.clamp_(coeff, min=finfo.tiny, max=finfo.max)
         
         for bi, i in enumerate(range(0, N, self.block_size)):
@@ -186,16 +186,16 @@ class LocallyAdaptiveKDE(AbstractKDE, ABC):
         N, D = X.shape
         block_sizes = []
         for i in range(N, 0, -self.block_size):
-            block_sizes.append(max(i, self.block_size))
+            block_sizes.append(min(i, self.block_size))
         
         probs = torch.tensor(block_sizes, dtype=X.dtype, device=X.device)
         probs = probs / probs.sum()
         samples_per_batch = sample_multinomial(n, probs)
-        offsets = torch.cumsum(samples_per_batch, dim=0)
         out = X.new_empty(n, D)
         eps = torch.finfo(X.dtype).eps
+        offset = 0
         
-        for bi, (num_samples, offset) in enumerate(zip(samples_per_batch, offsets)):
+        for bi, num_samples in enumerate(samples_per_batch):
             s = bi * self.block_size
             e = s + self.block_size
             X_train = X[s:e]
@@ -203,14 +203,12 @@ class LocallyAdaptiveKDE(AbstractKDE, ABC):
             sigma_0, _ = self.calc_prior_cov(X, bi)
             W_inv_contrib, nu = self.calc_posterior_contribs(X, bi)
             W_triu = self.calc_posterior(bi, sigma_0, W_inv_contrib)
-            scale_tril = W_triu.mul_((nu + 1 - D)[:, None, None])
+            scale_tril = tril_inverse(torch.sqrt(nu + 1 - D)[:, None, None] * W_triu).mT
             
             # select the points from which to draw
             for i in range(0, num_samples, self.block_size):
                 sample_size = min(num_samples - i, self.block_size)
-                inds = torch.randint(block_sizes[bi], (sample_size,),
-                                     device=X.device)
-                
+                inds = torch.randint(block_sizes[bi], (sample_size,), device=X.device)
                 X_train_i = X_train[inds]
                 scale_tril_i = scale_tril[inds]
                 nu_i = nu[inds]
@@ -221,7 +219,8 @@ class LocallyAdaptiveKDE(AbstractKDE, ABC):
                 y = torch.distributions.MultivariateNormal(loc=torch.zeros_like(X_train_i),
                                                            scale_tril=scale_tril_i).sample()
                 u = torch.clamp_min(torch.distributions.Chi2(df=nu_i + 1 - D).sample(), eps)
-                out[offset + i:offset + i + sample_size] = X_train_i + y / torch.sqrt(u / (nu_i + 1 - D))[..., None]
+                out[offset:offset + sample_size] = X_train_i + y / torch.sqrt(u / (nu_i + 1 - D))[..., None]
+                offset += sample_size
         
         return out
     

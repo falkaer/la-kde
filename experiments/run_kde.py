@@ -139,7 +139,8 @@ def run_kde(args):
         norm = plt.Normalize()
         
         fig = plt.figure(figsize=(10, 10))
-        plot_kde_colormesh(model, X, norm=norm, ax=fig.gca())
+        ax = fig.gca()
+        plot_kde_colormesh(model, X, norm=norm, ax=ax)
         fig.tight_layout()
         
         if args.plot_out is not None:
